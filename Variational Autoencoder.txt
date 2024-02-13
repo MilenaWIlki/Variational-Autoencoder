@@ -1,0 +1,47 @@
+import tensorflow as tf
+from tensorflow.keras.layers import Input, Dense, Lambda
+from tensorflow.keras.models import Model
+from tensorflow.keras.losses import mse
+from tensorflow.keras.datasets import mnist
+import numpy as np
+
+def sampling(args):
+    z_mean, z_log_var = args
+    batch = tf.shape(z_mean)[0]
+    dim = tf.shape(z_mean)[1]
+    epsilon = tf.keras.backend.random_normal(shape=(batch, dim))
+    return z_mean + tf.exp(0.5 * z_log_var) * epsilon
+
+(X_train, y_train), (X_test, y_test) = mnist.load_data()
+X_train = X_train.astype('float32') / 255.
+X_test = X_test.astype('float32') / 255.
+X_train = np.reshape(X_train, (-1, 784))
+X_test = np.reshape(X_test, (-1, 784))
+
+input_shape = (784, )
+latent_dim = 2
+
+inputs = Input(shape=input_shape)
+encoder = Dense(256, activation='relu')(inputs)
+z_mean = Dense(latent_dim)(encoder)
+z_log_var = Dense(latent_dim)(encoder)
+z = Lambda(sampling)([z_mean, z_log_var])
+encoder = Model(inputs, [z_mean, z_log_var, z])
+
+latent_inputs = Input(shape=(latent_dim,))
+decoder = Dense(256, activation='relu')(latent_inputs)
+outputs = Dense(784, activation='sigmoid')(decoder)
+decoder = Model(latent_inputs, outputs)
+
+outputs = decoder(encoder(inputs)[2])
+vae = Model(inputs, outputs)
+
+reconstruction_loss = mse(inputs, outputs)
+reconstruction_loss *= 784
+kl_loss = 1 + z_log_var - tf.square(z_mean) - tf.exp(z_log_var)
+kl_loss = tf.reduce_sum(kl_loss, axis=-1)
+kl_loss *= -0.5
+vae_loss = tf.reduce_mean(reconstruction_loss + kl_loss)
+vae.add_loss(vae_loss)
+vae.compile(optimizer='adam')
+vae.fit(X_train, epochs=10, batch_size=128)
